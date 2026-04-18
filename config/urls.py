@@ -17,8 +17,11 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import include
 from django.urls import path
+from apps.users.webhooks import VapiWebhookView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('api/vapi/webhook', VapiWebhookView.as_view(), name='vapi-webhook-no-slash'),
+    path('api/vapi/webhook/', VapiWebhookView.as_view(), name='vapi-webhook'),
     path('api/users/', include('apps.users.urls')),
 ]

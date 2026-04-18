@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
 import os
+from datetime import timedelta
 from pathlib import Path
 
 import dj_database_url
@@ -114,7 +115,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Kolkata'
 
 USE_I18N = True
 
@@ -136,3 +137,41 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
     ),
 }
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(
+        minutes=int(os.getenv('JWT_ACCESS_TOKEN_MINUTES', '60'))
+    ),
+    'REFRESH_TOKEN_LIFETIME': timedelta(
+        days=int(os.getenv('JWT_REFRESH_TOKEN_DAYS', '7'))
+    ),
+    'ROTATE_REFRESH_TOKENS': os.getenv('JWT_ROTATE_REFRESH_TOKENS', 'False') == 'True',
+    'BLACKLIST_AFTER_ROTATION': os.getenv('JWT_BLACKLIST_AFTER_ROTATION', 'False') == 'True',
+    'UPDATE_LAST_LOGIN': os.getenv('JWT_UPDATE_LAST_LOGIN', 'False') == 'True',
+}
+
+REDIS_URL = os.getenv('REDIS_URL', '')
+CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL') or REDIS_URL or 'redis://127.0.0.1:6379/0'
+CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND') or REDIS_URL or CELERY_BROKER_URL
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_ENABLE_UTC = True
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = int(os.getenv('CELERY_TASK_TIME_LIMIT', '300'))
+
+if CELERY_BROKER_URL.startswith('rediss://'):
+    CELERY_BROKER_USE_SSL = {'ssl_cert_reqs': 'none'}
+if CELERY_RESULT_BACKEND.startswith('rediss://'):
+    CELERY_REDIS_BACKEND_USE_SSL = {'ssl_cert_reqs': 'none'}
+
+VAPI_API_KEY = os.getenv('VAPI_API_KEY', '')
+VAPI_API_URL = os.getenv('VAPI_API_URL', 'https://api.vapi.ai/call')
+VAPI_PHONE_NUMBER_ID = os.getenv('VAPI_PHONE_NUMBER_ID', '')
+VAPI_ASSISTANT_ID = os.getenv('VAPI_ASSISTANT_ID', '')
+VAPI_TWILIO_PHONE_NUMBER = os.getenv('VAPI_TWILIO_PHONE_NUMBER', '')
+VAPI_TWILIO_ACCOUNT_SID = os.getenv('VAPI_TWILIO_ACCOUNT_SID', '')
+VAPI_WEBHOOK_URL = os.getenv('VAPI_WEBHOOK_URL', '')
+VAPI_WEBHOOK_SECRET = os.getenv('VAPI_WEBHOOK_SECRET', '')
+VAPI_RETRY_DELAY_MINUTES = int(os.getenv('VAPI_RETRY_DELAY_MINUTES', '5'))
