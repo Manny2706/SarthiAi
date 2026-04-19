@@ -9,3 +9,14 @@ wheels/
 
 # Virtual environments
 .venv
+# Django-specific files
+db.sqlite3
+staticfiles/
+# IDE-specific files
+.vscode/
+# Git files
+.git/
+
+# Ignore the .env file containing sensitive information
+.env
+# 

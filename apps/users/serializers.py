@@ -62,6 +62,20 @@ class LoginSerializer(serializers.Serializer):
         return attrs
 
 
+class LogoutSerializer(serializers.Serializer):
+    refresh = serializers.CharField(required=False, allow_blank=False)
+    access = serializers.CharField(required=False, allow_blank=False)
+    token = serializers.CharField(required=False, allow_blank=False)
+
+    def validate(self, attrs):
+        token = attrs.get("refresh") or attrs.get("access") or attrs.get("token")
+        if not token:
+            raise serializers.ValidationError("Provide either a refresh token or an access token.")
+
+        attrs["token"] = token
+        return attrs
+
+
 class UserSerializer(serializers.ModelSerializer):
     name = serializers.SerializerMethodField()
     phone_number = serializers.SerializerMethodField()

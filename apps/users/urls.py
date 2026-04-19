@@ -2,7 +2,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView, TokenVerifyView
 from apps.users.views import (
-    LoginView, SignupView, RelativeViewSet,
+    LoginView, LogoutView, SignupView, RelativeViewSet,
     RelativeMedicineViewSet, MedicineScheduleViewSet
 )
 from apps.users.webhooks import VapiWebhookView
@@ -13,6 +13,7 @@ router.register(r'relatives', RelativeViewSet, basename='relative')
 urlpatterns = [
     path("signup/", SignupView.as_view(), name="signup"),
     path("login/", LoginView.as_view(), name="login"),
+    path("logout/", LogoutView.as_view(), name="logout"),
     path("token/refresh/", TokenRefreshView.as_view(), name="token-refresh"),
     path("token/verify/", TokenVerifyView.as_view(), name="token-verify"),
     path("webhooks/vapi/", VapiWebhookView.as_view(), name="vapi-webhook"),
