@@ -36,4 +36,14 @@ urlpatterns = [
         }),
         name='medicine-schedules'
     ),
+    path(
+        "relatives/<int:relative_id>/medicines/<int:medicine_id>/schedules/<int:pk>/",
+        MedicineScheduleViewSet.as_view({
+            'get': 'retrieve',
+            'patch': 'partial_update',
+            'put': 'update',
+            'delete': 'destroy',
+        }),
+        name='medicine-schedule-detail'
+    ),
 ]
