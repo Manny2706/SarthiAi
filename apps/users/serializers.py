@@ -101,6 +101,15 @@ def build_token_response(user):
     }
 
 
+class DoctorAgentMessageSerializer(serializers.Serializer):
+    message = serializers.CharField(max_length=1000, trim_whitespace=True)
+
+    def validate_message(self, value):
+        if not value.strip():
+            raise serializers.ValidationError("Message cannot be empty.")
+        return value
+
+
 class MedicineScheduleSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         start_date = attrs.get('start_date')

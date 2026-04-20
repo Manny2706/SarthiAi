@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView, TokenVerifyView
 from apps.users.views import (
     LoginView, LogoutView, SignupView, RelativeViewSet,
-    RelativeMedicineViewSet, MedicineScheduleViewSet
+    RelativeMedicineViewSet, MedicineScheduleViewSet, DoctorAgentChatView
 )
 from apps.users.webhooks import VapiWebhookView
 
@@ -14,6 +14,7 @@ urlpatterns = [
     path("signup/", SignupView.as_view(), name="signup"),
     path("login/", LoginView.as_view(), name="login"),
     path("logout/", LogoutView.as_view(), name="logout"),
+    path("agent/chat/", DoctorAgentChatView.as_view(), name="doctor-agent-chat"),
     path("token/refresh/", TokenRefreshView.as_view(), name="token-refresh"),
     path("token/verify/", TokenVerifyView.as_view(), name="token-verify"),
     path("webhooks/vapi/", VapiWebhookView.as_view(), name="vapi-webhook"),
