@@ -1,6 +1,6 @@
-import os
-
+import logging
 import requests
+from django.conf import settings
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import status
@@ -29,7 +29,7 @@ from .models import Relative
 from .models import RelativeMedicine
 from .models import MedicineSchedule
 from .models import UserProfile
-
+logger = logging.getLogger(__name__)
 class SignupView(APIView):
 	permission_classes = [AllowAny]
 
@@ -202,8 +202,9 @@ class DoctorAgentChatView(APIView):
 		"You are a medical emergency guidance assistant. "
 		"Give short, clear, practical steps only. "
 		"Do not diagnose. "
-		"If risk is high, tell the user to call emergency services immediately."
-		"Respond in the same language style as the user. If user writes Hinglish, reply in natural Hinglish (simple Roman Hindi + English mix)."
+		"If risk is high, tell the user to call emergency services immediately. "
+		"Respond in the same language style as the user. "
+		"If the user writes Hinglish or mixed Hindi-English, reply in natural Hinglish (simple Roman Hindi + English mix)."
 	)
 
 	EMERGENCY_KEYWORDS = [
@@ -257,6 +258,11 @@ class DoctorAgentChatView(APIView):
 			"or heavy bleeding, get emergency help now. Keep the person safe and calm meanwhile."
 		)
 
+	def _build_system_prompt(self, message):
+		if self._is_hinglish(message):
+			return self.SYSTEM_PROMPT + " Use Hinglish for the response. Keep it simple and direct."
+		return self.SYSTEM_PROMPT + " Use clear English for the response. Keep it simple and direct."
+
 	def post(self, request):
 		serializer = DoctorAgentMessageSerializer(data=request.data)
 		serializer.is_valid(raise_exception=True)
@@ -271,34 +277,104 @@ class DoctorAgentChatView(APIView):
 				status=status.HTTP_200_OK,
 			)
 
-		api_key = os.getenv("AI_API_KEY", "")
-		model = os.getenv("AI_MODEL", "gpt-4.1-mini")
-		base_url = os.getenv("AI_BASE_URL", "https://api.openai.com/v1")
+		nvidia_api_key = settings.NVIDIA_API_KEY
+		nvidia_model = settings.NVIDIA_MODEL
+		nvidia_base_url = settings.NVIDIA_BASE_URL
+		nvidia_max_tokens = settings.NVIDIA_MAX_OUTPUT_TOKENS
+		nvidia_connect_timeout = settings.NVIDIA_CONNECT_TIMEOUT_SECONDS
+		nvidia_read_timeout = settings.NVIDIA_READ_TIMEOUT_SECONDS
+		nvidia_retry_attempts = max(1, settings.NVIDIA_RETRY_ATTEMPTS)
+		nvidia_http_proxy = settings.NVIDIA_HTTP_PROXY
+		nvidia_https_proxy = settings.NVIDIA_HTTPS_PROXY
+		proxies = {}
+		if nvidia_http_proxy:
+			proxies["http"] = nvidia_http_proxy
+		if nvidia_https_proxy:
+			proxies["https"] = nvidia_https_proxy
 
-		if not api_key:
-			return Response({"reply": self._fallback_reply(message)}, status=status.HTTP_200_OK)
+		if not nvidia_api_key:
+			logger.error("No AI key configured. Expected NVIDIA_API_KEY.")
+			return Response(
+				{"detail": "AI service is not configured."},
+				status=status.HTTP_503_SERVICE_UNAVAILABLE,
+			)
 
 		try:
-			response = requests.post(
-				f"{base_url}/chat/completions",
-				headers={
-					"Authorization": f"Bearer {api_key}",
-					"Content-Type": "application/json",
-				},
-				json={
-					"model": model,
-					"temperature": 0.2,
-					"max_tokens": 220,
-					"messages": [
-						{"role": "system", "content": self.SYSTEM_PROMPT},
-						{"role": "user", "content": message},
-					],
-				},
-				timeout=12,
-			)
+			logger.info("Calling NVIDIA agent for user=%s with model=%s", request.user.id, nvidia_model)
+			endpoint = f"{nvidia_base_url.rstrip('/')}/chat/completions"
+			response = None
+			last_network_error = None
+			for attempt in range(1, nvidia_retry_attempts + 1):
+				try:
+					response = requests.post(
+						endpoint,
+						headers={
+							"Authorization": f"Bearer {nvidia_api_key}",
+							"Content-Type": "application/json",
+						},
+						json={
+							"model": nvidia_model,
+							"temperature": 0.2,
+							"max_tokens": nvidia_max_tokens,
+							"messages": [
+								{"role": "system", "content": self._build_system_prompt(message)},
+								{"role": "user", "content": message},
+							],
+						},
+						timeout=(nvidia_connect_timeout, nvidia_read_timeout),
+						proxies=proxies or None,
+					)
+					break
+				except (requests.Timeout, requests.ConnectionError) as exc:
+					last_network_error = exc
+					logger.warning(
+						"NVIDIA network error for user=%s attempt=%s/%s",
+						request.user.id,
+						attempt,
+						nvidia_retry_attempts,
+						exc_info=True,
+					)
+					continue
+
+			if response is None:
+				if isinstance(last_network_error, requests.Timeout):
+					raise last_network_error
+				if isinstance(last_network_error, requests.ConnectionError):
+					raise last_network_error
+				raise requests.RequestException("NVIDIA request failed without response")
+
+			if response.status_code == 429:
+				logger.warning("NVIDIA free-tier quota/rate-limit user=%s body=%s", request.user.id, response.text)
+				return Response(
+					{"detail": "NVIDIA free-tier quota exhausted. Wait and retry."},
+					status=status.HTTP_429_TOO_MANY_REQUESTS,
+				)
+			if response.status_code >= 400:
+				logger.error(
+					"NVIDIA API error user=%s status=%s body=%s",
+					request.user.id,
+					response.status_code,
+					response.text,
+				)
 			response.raise_for_status()
 			data = response.json()
 			reply = data["choices"][0]["message"]["content"].strip()
 			return Response({"reply": reply}, status=status.HTTP_200_OK)
+		except requests.Timeout:
+			logger.exception("NVIDIA request timed out for user=%s", request.user.id)
+			return Response(
+				{"detail": "NVIDIA request timed out. Check firewall/proxy and retry."},
+				status=status.HTTP_504_GATEWAY_TIMEOUT,
+			)
+		except requests.ConnectionError:
+			logger.exception("NVIDIA connection error for user=%s", request.user.id)
+			return Response(
+				{"detail": "NVIDIA connection blocked or reset. Check firewall/proxy and retry."},
+				status=status.HTTP_503_SERVICE_UNAVAILABLE,
+			)
 		except requests.RequestException:
-			return Response({"reply": self._fallback_reply(message)}, status=status.HTTP_200_OK)
+			logger.exception("AI request failed for user=%s", request.user.id)
+			return Response(
+				{"detail": "AI service unavailable."},
+				status=status.HTTP_503_SERVICE_UNAVAILABLE,
+			)
