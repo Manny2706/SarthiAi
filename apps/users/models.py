@@ -16,7 +16,9 @@ class Relative(models.Model):
     name = models.CharField(max_length=100)
     relationship = models.CharField(max_length=50)  # e.g., "Father", "Mother"
     age = models.IntegerField(null=True)
+    phone_number = models.CharField(max_length=20, unique=True, default="")  # Default to user's phone number if not provided
     created_at = models.DateTimeField(auto_now_add=True)
+    conditions = models.TextField(blank=True, default="")  # e.g., "Diabetes, Hypertension"
 
     def __str__(self):
         return f"{self.name} ({self.relationship})"

@@ -181,7 +181,7 @@ class RelativeMedicineSerializer(serializers.ModelSerializer):
         relative = validated_data['relative']
         validated_data['relative_name'] = relative.name
         validated_data['relative_relationship'] = relative.relationship
-        validated_data['relative_phone_number'] = relative.user.profile.phone_number
+        validated_data['relative_phone_number'] = relative.phone_number
         return super().create(validated_data)
     
     class Meta:
@@ -224,10 +224,10 @@ class RelativeSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Relative
-        fields = ('id', 'name', 'relationship', 'age', 'medicines', 'created_at')
+        fields = ('id', 'name', 'relationship', 'age', 'phone_number', 'conditions', 'medicines', 'created_at')
 
 class RelativeDetailSerializer(serializers.ModelSerializer):
     """For creating/updating relatives"""
     class Meta:
         model = Relative
-        fields = ('id', 'name', 'relationship', 'age')
+        fields = ('id', 'name', 'relationship', 'age', 'phone_number', 'conditions', 'created_at')
