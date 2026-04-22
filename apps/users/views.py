@@ -261,7 +261,7 @@ class DoctorAgentChatView(APIView):
 
 	def _build_system_prompt(self, message):
 		if self._is_hinglish(message):
-			return self.SYSTEM_PROMPT + " Use Hinglish for the response. Keep it simple and direct."
+			return self.SYSTEM_PROMPT + " Use Hinglish if user uses it else use clear English for the response. Keep it simple and direct."
 		return self.SYSTEM_PROMPT + " Use clear English for the response. Keep it simple and direct."
 
 	def post(self, request):
