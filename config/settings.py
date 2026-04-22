@@ -173,9 +173,9 @@ CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = int(os.getenv('CELERY_TASK_TIME_LIMIT', '300'))
 
 if CELERY_BROKER_URL.startswith('rediss://'):
-    CELERY_BROKER_USE_SSL = {'ssl_cert_reqs': 'none'}
+    CELERY_BROKER_USE_SSL = {'ssl_cert_reqs': 'required'}
 if CELERY_RESULT_BACKEND.startswith('rediss://'):
-    CELERY_REDIS_BACKEND_USE_SSL = {'ssl_cert_reqs': 'none'}
+    CELERY_REDIS_BACKEND_USE_SSL = {'ssl_cert_reqs': 'required'}
 
 VAPI_API_KEY = os.getenv('VAPI_API_KEY', '')
 VAPI_API_URL = os.getenv('VAPI_API_URL', 'https://api.vapi.ai/call')
