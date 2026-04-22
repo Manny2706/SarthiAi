@@ -5,7 +5,7 @@ from apps.users.views import (
     LoginView, LogoutView, SignupView, RelativeViewSet,
     RelativeMedicineViewSet, MedicineScheduleViewSet, DoctorAgentChatView
 )
-from apps.users.webhooks import VapiWebhookView
+from apps.users.webhooks import TwilioWhatsappWebhookView, VapiWebhookView
 
 router = DefaultRouter()
 router.register(r'relatives', RelativeViewSet, basename='relative')
@@ -18,6 +18,7 @@ urlpatterns = [
     path("token/refresh/", TokenRefreshView.as_view(), name="token-refresh"),
     path("token/verify/", TokenVerifyView.as_view(), name="token-verify"),
     path("webhooks/vapi/", VapiWebhookView.as_view(), name="vapi-webhook"),
+    path("webhooks/twilio/whatsapp/", TwilioWhatsappWebhookView.as_view(), name="twilio-whatsapp-webhook"),
     path("", include(router.urls)),
     
     # Nested routes for medicines and schedules

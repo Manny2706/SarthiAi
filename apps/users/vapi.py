@@ -15,6 +15,9 @@ def place_vapi_call(
     metadata: dict | None = None,
     webhook_url: str | None = None,
 ) -> dict:
+    if not settings.VAPI_CALLS_ENABLED:
+        raise VapiConfigurationError('VAPI calls are disabled by configuration.')
+
     if not settings.VAPI_API_KEY:
         raise VapiConfigurationError('VAPI_API_KEY is missing in environment configuration.')
     if not settings.VAPI_ASSISTANT_ID:

@@ -23,6 +23,7 @@ Required Vapi keys:
 - `VAPI_TWILIO_ACCOUNT_SID`
 - `VAPI_WEBHOOK_URL`
 - `VAPI_WEBHOOK_SECRET`
+- `VAPI_CALLS_ENABLED` (set `False` to disable all Vapi calls without removing credentials)
 - `VAPI_RETRY_DELAY_MINUTES`
 
 Webhook path:

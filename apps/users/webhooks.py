@@ -10,6 +10,24 @@ from django.conf import settings
 from apps.users.tasks import process_vapi_webhook
 
 
+def _normalize_payload(data):
+    if isinstance(data, dict):
+        return data
+
+    try:
+        items = data.lists()
+    except AttributeError:
+        return {'payload': data}
+
+    normalized = {}
+    for key, values in items:
+        if len(values) == 1:
+            normalized[key] = values[0]
+        else:
+            normalized[key] = values
+    return normalized
+
+
 class VapiWebhookView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
@@ -31,6 +49,16 @@ class VapiWebhookView(APIView):
             if provided_secret != secret:
                 return Response({'detail': 'Invalid webhook secret'}, status=status.HTTP_403_FORBIDDEN)
 
-        payload = request.data if isinstance(request.data, dict) else {'payload': request.data}
+        payload = _normalize_payload(request.data)
+        process_vapi_webhook.delay(payload)
+        return Response({'received': True}, status=status.HTTP_202_ACCEPTED)
+
+
+class TwilioWhatsappWebhookView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def post(self, request):
+        payload = _normalize_payload(request.data)
         process_vapi_webhook.delay(payload)
         return Response({'received': True}, status=status.HTTP_202_ACCEPTED)
