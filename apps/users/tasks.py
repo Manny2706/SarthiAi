@@ -105,7 +105,7 @@ def _build_whatsapp_message(schedule):
 
 def _send_whatsapp_reminder(schedule):
     from_number = settings.TWILIO_WHATSAPP_FROM
-    to_number = schedule.medicine.relative_phone_number
+    to_number = schedule.medicine.relative.phone_number
     if not from_number or not to_number:
         logger.warning('WhatsApp reminder skipped for schedule_id=%s due to missing phone number', schedule.id)
         return {'sent': False, 'reason': 'missing_phone_number'}
@@ -177,7 +177,7 @@ def _handle_twilio_whatsapp_reply(payload):
         .order_by('next_run_at', '-updated_at')
     )
     for candidate in candidates:
-        candidate_number = ''.join(ch for ch in (candidate.medicine.relative_phone_number or '') if ch.isdigit())
+        candidate_number = ''.join(ch for ch in (candidate.medicine.relative.phone_number or '') if ch.isdigit())
         if candidate_number and candidate_number == normalized_number:
             schedule = candidate
             break
@@ -415,7 +415,7 @@ def trigger_medicine_call(self, schedule_id, attempt_number=1, send_whatsapp_fir
     try:
         logger.info('Placing patient VAPI call for schedule_id=%s attempt=%s', schedule.id, attempt_number)
         vapi_response = place_vapi_call(
-            customer_number=schedule.medicine.relative_phone_number,
+            customer_number=schedule.medicine.relative.phone_number,
             assistant_overrides=assistant_overrides,
             metadata={**metadata, 'log_id': log.id},
             webhook_url=settings.VAPI_WEBHOOK_URL or None,
