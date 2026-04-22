@@ -8,6 +8,10 @@ from rest_framework.views import APIView
 from django.conf import settings
 
 from apps.users.tasks import process_vapi_webhook
+from config.myloggerconfig import get_master_logger
+
+
+logger = get_master_logger().getChild(__name__)
 
 
 def _normalize_payload(data):
@@ -34,6 +38,7 @@ class VapiWebhookView(APIView):
 
     def post(self, request):
         secret = settings.VAPI_WEBHOOK_SECRET
+        logger.debug('Received Vapi webhook request')
         if secret:
             authorization = request.headers.get('Authorization', '')
             bearer_prefix = 'Bearer '
@@ -47,9 +52,11 @@ class VapiWebhookView(APIView):
                     or request.query_params.get('secret')
                 )
             if provided_secret != secret:
+                logger.warning('Rejected Vapi webhook due to invalid secret')
                 return Response({'detail': 'Invalid webhook secret'}, status=status.HTTP_403_FORBIDDEN)
 
         payload = _normalize_payload(request.data)
+        logger.info('Accepted Vapi webhook and queued async processing')
         process_vapi_webhook.delay(payload)
         return Response({'received': True}, status=status.HTTP_202_ACCEPTED)
 
@@ -60,5 +67,6 @@ class TwilioWhatsappWebhookView(APIView):
 
     def post(self, request):
         payload = _normalize_payload(request.data)
+        logger.info('Accepted Twilio WhatsApp webhook and queued async processing')
         process_vapi_webhook.delay(payload)
         return Response({'received': True}, status=status.HTTP_202_ACCEPTED)

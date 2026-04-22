@@ -1,4 +1,3 @@
-import logging
 import requests
 from django.conf import settings
 from django.shortcuts import get_object_or_404
@@ -29,7 +28,9 @@ from .models import Relative
 from .models import RelativeMedicine
 from .models import MedicineSchedule
 from .models import UserProfile
-logger = logging.getLogger(__name__)
+from config.myloggerconfig import get_master_logger
+
+logger = get_master_logger().getChild(__name__)
 class SignupView(APIView):
 	permission_classes = [AllowAny]
 

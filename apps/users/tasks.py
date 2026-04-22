@@ -14,6 +14,10 @@ from twilio.rest import Client
 
 from apps.users.vapi import VapiConfigurationError
 from apps.users.vapi import place_vapi_call
+from config.myloggerconfig import get_master_logger
+
+
+logger = get_master_logger().getChild(__name__)
 
 
 PATIENT_CALL_RETRY_STATUSES = {'no_answer', 'busy', 'failed', 'missed'}
@@ -103,6 +107,7 @@ def _send_whatsapp_reminder(schedule):
     from_number = settings.TWILIO_WHATSAPP_FROM
     to_number = schedule.medicine.relative_phone_number
     if not from_number or not to_number:
+        logger.warning('WhatsApp reminder skipped for schedule_id=%s due to missing phone number', schedule.id)
         return {'sent': False, 'reason': 'missing_phone_number'}
 
     if not str(from_number).lower().startswith('whatsapp:'):
@@ -112,6 +117,7 @@ def _send_whatsapp_reminder(schedule):
 
     client = _get_twilio_client()
     if not client:
+        logger.warning('WhatsApp reminder skipped for schedule_id=%s because Twilio is not configured', schedule.id)
         return {'sent': False, 'reason': 'twilio_not_configured'}
 
     message = client.messages.create(
@@ -119,6 +125,7 @@ def _send_whatsapp_reminder(schedule):
         body=_build_whatsapp_message(schedule),
         to=to_number,
     )
+    logger.info('WhatsApp reminder sent for schedule_id=%s message_sid=%s', schedule.id, message.sid)
     return {'sent': True, 'message_sid': message.sid}
 
 
@@ -158,6 +165,8 @@ def _handle_twilio_whatsapp_reply(payload):
     if not reply:
         return None
 
+    logger.debug('Processing Twilio WhatsApp reply payload')
+
     from_number = reply['from_number']
     normalized_number = ''.join(ch for ch in from_number if ch.isdigit())
 
@@ -173,6 +182,7 @@ def _handle_twilio_whatsapp_reply(payload):
             schedule = candidate
             break
     if not schedule:
+        logger.warning('Twilio WhatsApp reply skipped: schedule not found for incoming number')
         return {'status': 'skipped', 'reason': 'schedule_not_found_for_phone'}
 
     current_attempt = max(schedule.patient_call_attempts, 1)
@@ -188,6 +198,7 @@ def _handle_twilio_whatsapp_reply(payload):
     )
 
     if reply['taken']:
+        logger.info('Medication marked as taken from WhatsApp reply for schedule_id=%s', schedule.id)
         _cancel_pending_schedule_task(schedule)
         schedule.patient_call_status = 'taken'
         schedule.save(update_fields=['patient_call_status', 'updated_at'])
@@ -196,6 +207,8 @@ def _handle_twilio_whatsapp_reply(payload):
 
     schedule.patient_call_status = 'missed'
     schedule.save(update_fields=['patient_call_status', 'updated_at'])
+
+    logger.info('Medication marked missed from WhatsApp reply; triggering call for schedule_id=%s', schedule.id)
 
     _cancel_pending_schedule_task(schedule)
     async_result = trigger_medicine_call.apply_async(
@@ -297,9 +310,11 @@ def trigger_medicine_call(self, schedule_id, attempt_number=1, send_whatsapp_fir
             'medicine__relative__user__profile',
         ).get(id=schedule_id)
     except MedicineSchedule.DoesNotExist:
+        logger.warning('Medicine call skipped: schedule_id=%s not found', schedule_id)
         return {'status': 'skipped', 'reason': 'schedule_not_found'}
 
     if not schedule.is_active:
+        logger.info('Medicine call skipped: schedule_id=%s is inactive', schedule.id)
         return {'status': 'skipped', 'reason': 'schedule_inactive'}
 
     now = timezone.now()
@@ -308,6 +323,7 @@ def trigger_medicine_call(self, schedule_id, attempt_number=1, send_whatsapp_fir
         schedule.next_run_at = None
         schedule.celery_task_id = ''
         schedule.save(update_fields=['is_active', 'next_run_at', 'celery_task_id', 'updated_at'])
+        logger.info('Medicine call skipped: schedule_id=%s ended by date', schedule.id)
         return {'status': 'skipped', 'reason': 'schedule_ended'}
 
     attempt_number = int(attempt_number or 1)
@@ -345,6 +361,7 @@ def trigger_medicine_call(self, schedule_id, attempt_number=1, send_whatsapp_fir
         try:
             whatsapp_result = _send_whatsapp_reminder(schedule)
         except TwilioException:
+            logger.exception('Twilio error while sending WhatsApp reminder for schedule_id=%s', schedule.id)
             whatsapp_result = {'sent': False, 'reason': 'twilio_error'}
 
         MedicationLog.objects.create(
@@ -366,6 +383,7 @@ def trigger_medicine_call(self, schedule_id, attempt_number=1, send_whatsapp_fir
             schedule.celery_task_id = async_result.id
             schedule.next_run_at = timezone.now() + timedelta(minutes=wait_minutes)
             schedule.save(update_fields=['celery_task_id', 'next_run_at', 'updated_at'])
+            logger.info('Scheduled post-WhatsApp call check for schedule_id=%s', schedule.id)
             return {
                 'status': 'reminder_sent',
                 'schedule_id': schedule.id,
@@ -391,9 +409,11 @@ def trigger_medicine_call(self, schedule_id, attempt_number=1, send_whatsapp_fir
             raw_payload={'reason': 'vapi_calls_disabled', 'metadata': metadata},
         )
         _schedule_next_cycle(schedule)
+        logger.warning('VAPI disabled; skipped patient call for schedule_id=%s', schedule.id)
         return {'status': 'skipped', 'reason': 'vapi_calls_disabled'}
 
     try:
+        logger.info('Placing patient VAPI call for schedule_id=%s attempt=%s', schedule.id, attempt_number)
         vapi_response = place_vapi_call(
             customer_number=schedule.medicine.relative_phone_number,
             assistant_overrides=assistant_overrides,
@@ -414,8 +434,10 @@ def trigger_medicine_call(self, schedule_id, attempt_number=1, send_whatsapp_fir
             call_id='',
             raw_payload={'reason': str(exc), 'metadata': metadata},
         )
+        logger.error('VAPI configuration error for schedule_id=%s: %s', schedule.id, str(exc))
         return {'status': 'skipped', 'reason': 'vapi_configuration_error'}
     except Exception as exc:
+        logger.exception('Unexpected VAPI error for schedule_id=%s; retrying task', schedule.id)
         raise self.retry(exc=exc)
 
     call_id = str(vapi_response.get('id') or vapi_response.get('callId') or vapi_response.get('call_id') or '')
@@ -426,6 +448,8 @@ def trigger_medicine_call(self, schedule_id, attempt_number=1, send_whatsapp_fir
 
     if call_id:
         MedicationLog.objects.filter(id=log.id).update(call_id=call_id, raw_payload=vapi_response)
+
+    logger.info('Patient VAPI call created for schedule_id=%s call_id=%s', schedule.id, call_id)
 
     return {
         'status': 'called',
@@ -448,10 +472,12 @@ def trigger_escalation_call(self, schedule_id):
             'medicine__relative__user__profile',
         ).get(id=schedule_id)
     except MedicineSchedule.DoesNotExist:
+        logger.warning('Escalation skipped: schedule_id=%s not found', schedule_id)
         return {'status': 'skipped', 'reason': 'schedule_not_found'}
 
     user_profile = getattr(schedule.medicine.relative.user, 'profile', None)
     if not user_profile or not user_profile.phone_number:
+        logger.warning('Escalation skipped for schedule_id=%s: user phone missing', schedule.id)
         return {'status': 'skipped', 'reason': 'user_phone_missing'}
 
     assistant_overrides = {
@@ -495,9 +521,11 @@ def trigger_escalation_call(self, schedule_id):
             raw_payload={'reason': 'vapi_calls_disabled', 'metadata': metadata},
         )
         _schedule_next_cycle(schedule)
+        logger.warning('Escalation skipped for schedule_id=%s because VAPI is disabled', schedule.id)
         return {'status': 'skipped', 'reason': 'vapi_calls_disabled'}
 
     try:
+        logger.info('Placing escalation VAPI call for schedule_id=%s', schedule.id)
         vapi_response = place_vapi_call(
             customer_number=user_profile.phone_number,
             assistant_overrides=assistant_overrides,
@@ -518,8 +546,10 @@ def trigger_escalation_call(self, schedule_id):
             raw_payload={'reason': str(exc), 'metadata': metadata},
         )
         _schedule_next_cycle(schedule)
+        logger.error('Escalation VAPI configuration error for schedule_id=%s: %s', schedule.id, str(exc))
         return {'status': 'skipped', 'reason': 'vapi_configuration_error'}
     except Exception as exc:
+        logger.exception('Unexpected escalation VAPI error for schedule_id=%s; retrying task', schedule.id)
         raise self.retry(exc=exc)
 
     call_id = str(vapi_response.get('id') or vapi_response.get('callId') or vapi_response.get('call_id') or '')
@@ -530,6 +560,8 @@ def trigger_escalation_call(self, schedule_id):
 
     if call_id:
         MedicationLog.objects.filter(id=log.id).update(call_id=call_id, raw_payload=vapi_response)
+
+    logger.info('Escalation VAPI call created for schedule_id=%s call_id=%s', schedule.id, call_id)
 
     _schedule_next_cycle(schedule)
 
@@ -548,12 +580,14 @@ def process_vapi_webhook(self, payload):
 
     twilio_result = _handle_twilio_whatsapp_reply(payload)
     if twilio_result is not None:
+        logger.info('Webhook processed as Twilio WhatsApp event: %s', twilio_result.get('action') or twilio_result.get('reason'))
         return twilio_result
 
     # Compact webhook contract example: {"id": "med_123", "taken": true}
     if isinstance(payload, dict) and 'id' in payload and 'taken' in payload and 'metadata' not in payload:
         schedule = _resolve_schedule_from_compact_id(payload.get('id'))
         if not schedule:
+            logger.warning('Compact webhook skipped: schedule not found for id=%s', payload.get('id'))
             return {'status': 'skipped', 'reason': 'schedule_not_found'}
 
         taken = bool(payload.get('taken'))
@@ -572,6 +606,7 @@ def process_vapi_webhook(self, payload):
             schedule.patient_call_status = 'answered'
             schedule.save(update_fields=['patient_call_status', 'updated_at'])
             _schedule_next_cycle(schedule)
+            logger.info('Compact webhook marked taken for schedule_id=%s', schedule.id)
             return {'status': 'handled', 'action': 'taken_confirmed'}
 
         next_attempt = current_attempt + 1
@@ -583,9 +618,11 @@ def process_vapi_webhook(self, payload):
                 args=[schedule.id, next_attempt],
                 countdown=int(settings.VAPI_RETRY_DELAY_MINUTES) * 60,
             )
+            logger.info('Compact webhook scheduled retry for schedule_id=%s attempt=%s', schedule.id, next_attempt)
             return {'status': 'handled', 'action': 'retry_scheduled', 'attempts': next_attempt}
 
         trigger_escalation_call.delay(schedule.id)
+        logger.info('Compact webhook scheduled escalation for schedule_id=%s', schedule.id)
         return {'status': 'handled', 'action': 'escalation_scheduled', 'attempts': next_attempt}
 
     metadata = payload.get('metadata') or payload.get('call', {}).get('metadata') or {}
@@ -608,6 +645,7 @@ def process_vapi_webhook(self, payload):
         schedule = MedicineSchedule.objects.filter(id=schedule_id).first()
 
     if not schedule:
+        logger.warning('VAPI webhook skipped: schedule not found for call_id=%s', call_id)
         return {'status': 'skipped', 'reason': 'schedule_not_found'}
 
     normalized_status = 'queued'
@@ -638,6 +676,7 @@ def process_vapi_webhook(self, payload):
             schedule.patient_call_attempts = max(schedule.patient_call_attempts, int(metadata.get('attempt_number') or 1))
             schedule.save(update_fields=['patient_call_status', 'patient_call_attempts', 'updated_at'])
             _schedule_next_cycle(schedule)
+            logger.info('Patient call answered for schedule_id=%s', schedule.id)
             return {'status': 'handled', 'action': 'answered'}
 
         if normalized_status in {'no_answer', 'busy', 'failed'}:
@@ -652,14 +691,17 @@ def process_vapi_webhook(self, payload):
                     args=[schedule.id, next_attempt],
                     countdown=int(settings.VAPI_RETRY_DELAY_MINUTES) * 60,
                 )
+                logger.info('Patient call retry scheduled for schedule_id=%s attempt=%s', schedule.id, next_attempt)
                 return {'status': 'handled', 'action': 'retry_scheduled', 'attempts': next_attempt}
 
             trigger_escalation_call.delay(schedule.id)
+            logger.info('Patient call escalation scheduled for schedule_id=%s', schedule.id)
             return {'status': 'handled', 'action': 'escalation_scheduled', 'attempts': next_attempt}
 
     if call_kind == 'escalation' and normalized_status == 'answered':
         schedule.patient_call_status = 'escalated'
         schedule.save(update_fields=['patient_call_status', 'updated_at'])
+        logger.info('Escalation call answered for schedule_id=%s', schedule.id)
         return {'status': 'handled', 'action': 'escalation_answered'}
 
     return {'status': 'handled', 'action': 'logged'}

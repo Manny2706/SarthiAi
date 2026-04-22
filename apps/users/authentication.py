@@ -4,6 +4,10 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import InvalidToken
 
 from apps.users.models import UserProfile
+from config.myloggerconfig import get_master_logger
+
+
+logger = get_master_logger().getChild(__name__)
 
 
 class RevocationAwareJWTAuthentication(JWTAuthentication):
@@ -21,6 +25,8 @@ class RevocationAwareJWTAuthentication(JWTAuthentication):
 
         token_issued_at = datetime.fromtimestamp(int(issued_at), tz=datetime_timezone.utc)
         if token_issued_at <= profile.last_logout_at:
+            logger.warning("Rejected revoked token for user_id=%s", user_id)
             raise InvalidToken("Token has been revoked.")
 
+        logger.debug("Token validated for user_id=%s", user_id)
         return validated_token

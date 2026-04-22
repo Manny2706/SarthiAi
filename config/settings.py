@@ -17,6 +17,8 @@ from pathlib import Path
 import dj_database_url
 from dotenv import load_dotenv
 
+from config.myloggerconfig import get_master_logger
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -198,3 +200,6 @@ NVIDIA_READ_TIMEOUT_SECONDS = float(os.getenv('NVIDIA_READ_TIMEOUT_SECONDS', '15
 NVIDIA_RETRY_ATTEMPTS = int(os.getenv('NVIDIA_RETRY_ATTEMPTS', '2'))
 NVIDIA_HTTP_PROXY = os.getenv('NVIDIA_HTTP_PROXY', '')
 NVIDIA_HTTPS_PROXY = os.getenv('NVIDIA_HTTPS_PROXY', '')
+
+# Initialize application-wide rotating file logger during settings load.
+MASTER_LOGGER = get_master_logger()
