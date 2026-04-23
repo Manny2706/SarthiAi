@@ -59,14 +59,3 @@ class VapiWebhookView(APIView):
         logger.info('Accepted Vapi webhook and queued async processing')
         process_vapi_webhook.delay(payload)
         return Response({'received': True}, status=status.HTTP_202_ACCEPTED)
-
-
-class TwilioWhatsappWebhookView(APIView):
-    permission_classes = [AllowAny]
-    authentication_classes = []
-
-    def post(self, request):
-        payload = _normalize_payload(request.data)
-        logger.info('Accepted Twilio WhatsApp webhook and queued async processing')
-        process_vapi_webhook.delay(payload)
-        return Response({'received': True}, status=status.HTTP_202_ACCEPTED)

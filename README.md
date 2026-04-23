@@ -18,9 +18,7 @@ Required Vapi keys:
 
 - `VAPI_API_KEY`
 - `VAPI_ASSISTANT_ID`
-- `VAPI_PHONE_NUMBER_ID` (or use Twilio fields below)
-- `VAPI_TWILIO_PHONE_NUMBER`
-- `VAPI_TWILIO_ACCOUNT_SID`
+- `VAPI_PHONE_NUMBER_ID`
 - `VAPI_WEBHOOK_URL`
 - `VAPI_WEBHOOK_SECRET`
 - `VAPI_CALLS_ENABLED` (set `False` to disable all Vapi calls without removing credentials)

@@ -9,8 +9,6 @@ from celery import current_app
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
-from twilio.base.exceptions import TwilioException
-from twilio.rest import Client
 
 from apps.users.vapi import VapiConfigurationError
 from apps.users.vapi import place_vapi_call
@@ -22,8 +20,6 @@ logger = get_master_logger().getChild(__name__)
 
 PATIENT_CALL_RETRY_STATUSES = {'no_answer', 'busy', 'failed', 'missed'}
 ANSWERED_STATUSES = {'answered', 'completed', 'taken'}
-WHATSAPP_POSITIVE_REPLIES = {'yes', 'y', 'taken', 'done'}
-WHATSAPP_NEGATIVE_REPLIES = {'no', 'n', 'not', 'missed'}
 
 
 def _to_aware(date_value, time_value):
@@ -88,65 +84,6 @@ def _build_assistant_overrides(schedule):
     }
 
 
-def _get_twilio_client():
-    account_sid = settings.TWILIO_ACCOUNT_SID
-    auth_token = settings.TWILIO_AUTH_TOKEN
-    if not account_sid or not auth_token:
-        return None
-    return Client(account_sid, auth_token)
-
-
-def _build_whatsapp_message(schedule):
-    medicine = schedule.medicine
-    relative_name = medicine.relative_name or medicine.relative.name
-    dosage = f" {medicine.dosage}" if medicine.dosage else ''
-    return f"Hi {relative_name}, take {medicine.medicine_name}{dosage}. Reply YES or NO."
-
-
-def _send_whatsapp_reminder(schedule):
-    from_number = settings.TWILIO_WHATSAPP_FROM
-    to_number = schedule.medicine.relative.phone_number
-    if not from_number or not to_number:
-        logger.warning('WhatsApp reminder skipped for schedule_id=%s due to missing phone number', schedule.id)
-        return {'sent': False, 'reason': 'missing_phone_number'}
-
-    if not str(from_number).lower().startswith('whatsapp:'):
-        from_number = f"whatsapp:{from_number}"
-    if not str(to_number).lower().startswith('whatsapp:'):
-        to_number = f"whatsapp:{to_number}"
-
-    client = _get_twilio_client()
-    if not client:
-        logger.warning('WhatsApp reminder skipped for schedule_id=%s because Twilio is not configured', schedule.id)
-        return {'sent': False, 'reason': 'twilio_not_configured'}
-
-    message = client.messages.create(
-        from_=from_number,
-        body=_build_whatsapp_message(schedule),
-        to=to_number,
-    )
-    logger.info('WhatsApp reminder sent for schedule_id=%s message_sid=%s', schedule.id, message.sid)
-    return {'sent': True, 'message_sid': message.sid}
-
-
-def _extract_whatsapp_reply(payload):
-    if not isinstance(payload, dict):
-        return None
-
-    body = str(payload.get('Body') or payload.get('body') or '').strip().lower()
-    from_number = str(payload.get('From') or payload.get('from') or '').strip()
-    if not body or not from_number:
-        return None
-
-    normalized = re.sub(r'\s+', ' ', body)
-    token = normalized.split(' ')[0]
-    if token in WHATSAPP_POSITIVE_REPLIES:
-        return {'taken': True, 'from_number': from_number, 'raw_reply': body}
-    if token in WHATSAPP_NEGATIVE_REPLIES:
-        return {'taken': False, 'from_number': from_number, 'raw_reply': body}
-    return None
-
-
 def _cancel_pending_schedule_task(schedule):
     if not schedule.celery_task_id:
         return
@@ -155,68 +92,6 @@ def _cancel_pending_schedule_task(schedule):
     schedule.celery_task_id = ''
     schedule.next_run_at = None
     schedule.save(update_fields=['celery_task_id', 'next_run_at', 'updated_at'])
-
-
-def _handle_twilio_whatsapp_reply(payload):
-    from apps.users.models import MedicationLog
-    from apps.users.models import MedicineSchedule
-
-    reply = _extract_whatsapp_reply(payload)
-    if not reply:
-        return None
-
-    logger.debug('Processing Twilio WhatsApp reply payload')
-
-    from_number = reply['from_number']
-    normalized_number = ''.join(ch for ch in from_number if ch.isdigit())
-
-    schedule = None
-    candidates = (
-        MedicineSchedule.objects.select_related('medicine', 'medicine__relative')
-        .filter(is_active=True)
-        .order_by('next_run_at', '-updated_at')
-    )
-    for candidate in candidates:
-        candidate_number = ''.join(ch for ch in (candidate.medicine.relative.phone_number or '') if ch.isdigit())
-        if candidate_number and candidate_number == normalized_number:
-            schedule = candidate
-            break
-    if not schedule:
-        logger.warning('Twilio WhatsApp reply skipped: schedule not found for incoming number')
-        return {'status': 'skipped', 'reason': 'schedule_not_found_for_phone'}
-
-    current_attempt = max(schedule.patient_call_attempts, 1)
-    status_value = 'taken' if reply['taken'] else 'missed'
-    MedicationLog.objects.create(
-        schedule=schedule,
-        attempt_number=current_attempt,
-        call_kind='patient',
-        status=status_value,
-        event_type='whatsapp.reply',
-        call_id='',
-        raw_payload=payload,
-    )
-
-    if reply['taken']:
-        logger.info('Medication marked as taken from WhatsApp reply for schedule_id=%s', schedule.id)
-        _cancel_pending_schedule_task(schedule)
-        schedule.patient_call_status = 'taken'
-        schedule.save(update_fields=['patient_call_status', 'updated_at'])
-        _schedule_next_cycle(schedule)
-        return {'status': 'handled', 'action': 'taken_confirmed_whatsapp'}
-
-    schedule.patient_call_status = 'missed'
-    schedule.save(update_fields=['patient_call_status', 'updated_at'])
-
-    logger.info('Medication marked missed from WhatsApp reply; triggering call for schedule_id=%s', schedule.id)
-
-    _cancel_pending_schedule_task(schedule)
-    async_result = trigger_medicine_call.apply_async(
-        args=[schedule.id, current_attempt, False],
-    )
-    schedule.celery_task_id = async_result.id
-    schedule.save(update_fields=['celery_task_id', 'updated_at'])
-    return {'status': 'handled', 'action': 'call_started_after_no_reply'}
 
 
 def _resolve_schedule_from_compact_id(compact_id):
@@ -298,7 +173,7 @@ def _schedule_next_cycle(schedule):
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
-def trigger_medicine_call(self, schedule_id, attempt_number=1, send_whatsapp_first=True):
+def trigger_medicine_call(self, schedule_id, attempt_number=1):
     from apps.users.models import MedicationLog
     from apps.users.models import MedicineSchedule
 
@@ -328,7 +203,7 @@ def trigger_medicine_call(self, schedule_id, attempt_number=1, send_whatsapp_fir
 
     attempt_number = int(attempt_number or 1)
     schedule.patient_call_attempts = attempt_number
-    schedule.patient_call_status = 'whatsapp_sent' if send_whatsapp_first else 'ringing'
+    schedule.patient_call_status = 'ringing'
     schedule.last_called_at = now
     schedule.save(
         update_fields=[
@@ -356,43 +231,6 @@ def trigger_medicine_call(self, schedule_id, attempt_number=1, send_whatsapp_fir
         event_type='call.created',
         raw_payload=metadata,
     )
-
-    if send_whatsapp_first:
-        try:
-            whatsapp_result = _send_whatsapp_reminder(schedule)
-        except TwilioException:
-            logger.exception('Twilio error while sending WhatsApp reminder for schedule_id=%s', schedule.id)
-            whatsapp_result = {'sent': False, 'reason': 'twilio_error'}
-
-        MedicationLog.objects.create(
-            schedule=schedule,
-            attempt_number=attempt_number,
-            call_kind='patient',
-            status='queued',
-            event_type='whatsapp.sent' if whatsapp_result.get('sent') else 'whatsapp.skipped',
-            call_id=str(whatsapp_result.get('message_sid') or ''),
-            raw_payload=whatsapp_result,
-        )
-
-        if whatsapp_result.get('sent'):
-            wait_minutes = max(0, int(settings.TWILIO_WHATSAPP_REPLY_WAIT_MINUTES))
-            async_result = trigger_medicine_call.apply_async(
-                args=[schedule.id, attempt_number, False],
-                countdown=wait_minutes * 60,
-            )
-            schedule.celery_task_id = async_result.id
-            schedule.next_run_at = timezone.now() + timedelta(minutes=wait_minutes)
-            schedule.save(update_fields=['celery_task_id', 'next_run_at', 'updated_at'])
-            logger.info('Scheduled post-WhatsApp call check for schedule_id=%s', schedule.id)
-            return {
-                'status': 'reminder_sent',
-                'schedule_id': schedule.id,
-                'message_sid': whatsapp_result.get('message_sid'),
-            }
-
-    if schedule.patient_call_status != 'ringing':
-        schedule.patient_call_status = 'ringing'
-        schedule.save(update_fields=['patient_call_status', 'updated_at'])
 
     if not settings.VAPI_CALLS_ENABLED:
         schedule.patient_call_status = 'vapi_disabled'
@@ -577,11 +415,6 @@ def trigger_escalation_call(self, schedule_id):
 def process_vapi_webhook(self, payload):
     from apps.users.models import MedicationLog
     from apps.users.models import MedicineSchedule
-
-    twilio_result = _handle_twilio_whatsapp_reply(payload)
-    if twilio_result is not None:
-        logger.info('Webhook processed as Twilio WhatsApp event: %s', twilio_result.get('action') or twilio_result.get('reason'))
-        return twilio_result
 
     # Compact webhook contract example: {"id": "med_123", "taken": true}
     if isinstance(payload, dict) and 'id' in payload and 'taken' in payload and 'metadata' not in payload:
