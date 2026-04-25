@@ -1,9 +1,9 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from rest_framework_simplejwt.views import TokenRefreshView, TokenVerifyView
 from apps.users.views import (
     LoginView, LogoutView, SignupView, RelativeViewSet,
-    RelativeMedicineViewSet, MedicineScheduleViewSet, DoctorAgentChatView
+    RelativeMedicineViewSet, MedicineScheduleViewSet, DoctorAgentChatView,
+    ScopedTokenRefreshView, ScopedTokenVerifyView,
 )
 from apps.users.webhooks import VapiWebhookView
 
@@ -15,8 +15,8 @@ urlpatterns = [
     path("login/", LoginView.as_view(), name="login"),
     path("logout/", LogoutView.as_view(), name="logout"),
     path("agent/chat/", DoctorAgentChatView.as_view(), name="doctor-agent-chat"),
-    path("token/refresh/", TokenRefreshView.as_view(), name="token-refresh"),
-    path("token/verify/", TokenVerifyView.as_view(), name="token-verify"),
+    path("token/refresh/", ScopedTokenRefreshView.as_view(), name="token-refresh"),
+    path("token/verify/", ScopedTokenVerifyView.as_view(), name="token-verify"),
     path("webhooks/vapi/", VapiWebhookView.as_view(), name="vapi-webhook"),
     path("", include(router.urls)),
     

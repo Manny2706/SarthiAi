@@ -3,6 +3,7 @@ from __future__ import annotations
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from django.conf import settings
@@ -35,6 +36,8 @@ def _normalize_payload(data):
 class VapiWebhookView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'vapi_webhook'
 
     def post(self, request):
         secret = settings.VAPI_WEBHOOK_SECRET

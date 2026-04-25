@@ -145,7 +145,16 @@ REST_FRAMEWORK = {
     ),
     'DEFAULT_THROTTLE_RATES': {
         'user': '60/min',
+        'signup': '5/min',
+        'login': '10/min',
+        'logout': '15/min',
+        'token_refresh': '20/min',
+        'token_verify': '30/min',
+        'relatives': '120/min',
+        'relative_medicines': '120/min',
+        'medicine_schedules': '120/min',
         'doctor_agent': '8/min',
+        'vapi_webhook': '900/min',
     },
 }
 

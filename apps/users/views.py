@@ -14,6 +14,8 @@ from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
 from rest_framework_simplejwt.token_blacklist.models import OutstandingToken
 from rest_framework_simplejwt.tokens import AccessToken
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.views import TokenRefreshView
+from rest_framework_simplejwt.views import TokenVerifyView
 from apps.users.serializers import LoginSerializer
 from apps.users.serializers import LogoutSerializer
 from apps.users.serializers import SignupSerializer
@@ -33,6 +35,9 @@ from config.myloggerconfig import get_master_logger
 logger = get_master_logger().getChild(__name__)
 class SignupView(APIView):
 	permission_classes = [AllowAny]
+	authentication_classes = []
+	throttle_classes = [ScopedRateThrottle]
+	throttle_scope = "signup"
 
 	def post(self, request):
 		serializer = SignupSerializer(data=request.data)
@@ -52,6 +57,9 @@ class SignupView(APIView):
 
 class LoginView(APIView):
 	permission_classes = [AllowAny]
+	authentication_classes = []
+	throttle_classes = [ScopedRateThrottle]
+	throttle_scope = "login"
 
 	def post(self, request):
 		serializer = LoginSerializer(data=request.data)
@@ -72,6 +80,8 @@ class LoginView(APIView):
 class LogoutView(APIView):
 	permission_classes = [AllowAny]
 	authentication_classes = []
+	throttle_classes = [ScopedRateThrottle]
+	throttle_scope = "logout"
 
 	def post(self, request):
 		serializer = LogoutSerializer(data=request.data)
@@ -122,76 +132,87 @@ class LogoutView(APIView):
 		)
 
 class RelativeViewSet(viewsets.ModelViewSet):
-    """
-    API endpoint for managing relatives
-    GET /relatives/ - List all relatives of logged-in user
-    POST /relatives/ - Create new relative
-    GET /relatives/{id}/ - Get relative details with medicines
-    PATCH /relatives/{id}/ - Update relative
-    DELETE /relatives/{id}/ - Delete relative
-    """
-    permission_classes = [IsAuthenticated]
-    
-    def get_queryset(self):
-        return Relative.objects.filter(user=self.request.user)
-    
-    def get_serializer_class(self):
-        if self.action == 'list' or self.action == 'retrieve':
-            return RelativeSerializer
-        return RelativeDetailSerializer
-    
-    def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
+	"""
+	API endpoint for managing relatives
+	GET /relatives/ - List all relatives of logged-in user
+	POST /relatives/ - Create new relative
+	GET /relatives/{id}/ - Get relative details with medicines
+	PATCH /relatives/{id}/ - Update relative
+	DELETE /relatives/{id}/ - Delete relative
+	"""
+
+	permission_classes = [IsAuthenticated]
+	throttle_classes = [ScopedRateThrottle]
+	throttle_scope = "relatives"
+
+	def get_queryset(self):
+		return Relative.objects.filter(user=self.request.user)
+
+	def get_serializer_class(self):
+		if self.action == 'list' or self.action == 'retrieve':
+			return RelativeSerializer
+		return RelativeDetailSerializer
+
+	def perform_create(self, serializer):
+		serializer.save(user=self.request.user)
+
 
 class RelativeMedicineViewSet(viewsets.ModelViewSet):
-    """
-    API endpoint for managing relative medicines
-    POST /relatives/{relative_id}/medicines/ - Add medicine
-    GET /relatives/{relative_id}/medicines/ - List medicines
-    """
-    permission_classes = [IsAuthenticated]
-    serializer_class = RelativeMedicineSerializer
-    
-    def get_queryset(self):
-        relative_id = self.kwargs.get('relative_id')
-        return RelativeMedicine.objects.filter(
-            relative_id=relative_id,
-            relative__user=self.request.user
-        )
-    
-    def perform_create(self, serializer):
-        relative_id = self.kwargs.get('relative_id')
-        relative = get_object_or_404(Relative, id=relative_id, user=self.request.user)
-        serializer.save(relative=relative)
+	"""
+	API endpoint for managing relative medicines
+	POST /relatives/{relative_id}/medicines/ - Add medicine
+	GET /relatives/{relative_id}/medicines/ - List medicines
+	"""
+
+	permission_classes = [IsAuthenticated]
+	serializer_class = RelativeMedicineSerializer
+	throttle_classes = [ScopedRateThrottle]
+	throttle_scope = "relative_medicines"
+
+	def get_queryset(self):
+		relative_id = self.kwargs.get('relative_id')
+		return RelativeMedicine.objects.filter(
+			relative_id=relative_id,
+			relative__user=self.request.user
+		)
+
+	def perform_create(self, serializer):
+		relative_id = self.kwargs.get('relative_id')
+		relative = get_object_or_404(Relative, id=relative_id, user=self.request.user)
+		serializer.save(relative=relative)
+
 
 class MedicineScheduleViewSet(viewsets.ModelViewSet):
-    """
-    API endpoint for medicine schedules
-    POST /relatives/{relative_id}/medicines/{medicine_id}/schedules/
-    GET /relatives/{relative_id}/medicines/{medicine_id}/schedules/
-    """
-    permission_classes = [IsAuthenticated]
-    serializer_class = MedicineScheduleSerializer
-    
-    def get_queryset(self):
-        medicine_id = self.kwargs.get('medicine_id')
-        relative_id = self.kwargs.get('relative_id')
-        return MedicineSchedule.objects.filter(
-            medicine_id=medicine_id,
-            medicine__relative_id=relative_id,
-            medicine__relative__user=self.request.user
-        )
-    
-    def perform_create(self, serializer):
-        medicine_id = self.kwargs.get('medicine_id')
-        relative_id = self.kwargs.get('relative_id')
-        medicine = get_object_or_404(
-            RelativeMedicine,
-            id=medicine_id,
-            relative_id=relative_id,
-            relative__user=self.request.user,
-        )
-        serializer.save(medicine=medicine)
+	"""
+	API endpoint for medicine schedules
+	POST /relatives/{relative_id}/medicines/{medicine_id}/schedules/
+	GET /relatives/{relative_id}/medicines/{medicine_id}/schedules/
+	"""
+
+	permission_classes = [IsAuthenticated]
+	serializer_class = MedicineScheduleSerializer
+	throttle_classes = [ScopedRateThrottle]
+	throttle_scope = "medicine_schedules"
+
+	def get_queryset(self):
+		medicine_id = self.kwargs.get('medicine_id')
+		relative_id = self.kwargs.get('relative_id')
+		return MedicineSchedule.objects.filter(
+			medicine_id=medicine_id,
+			medicine__relative_id=relative_id,
+			medicine__relative__user=self.request.user
+		)
+
+	def perform_create(self, serializer):
+		medicine_id = self.kwargs.get('medicine_id')
+		relative_id = self.kwargs.get('relative_id')
+		medicine = get_object_or_404(
+			RelativeMedicine,
+			id=medicine_id,
+			relative_id=relative_id,
+			relative__user=self.request.user,
+		)
+		serializer.save(medicine=medicine)
 
 
 class DoctorAgentChatView(APIView):
@@ -379,3 +400,17 @@ class DoctorAgentChatView(APIView):
 				{"detail": "AI service unavailable."},
 				status=status.HTTP_503_SERVICE_UNAVAILABLE,
 			)
+
+
+class ScopedTokenRefreshView(TokenRefreshView):
+	permission_classes = [AllowAny]
+	authentication_classes = []
+	throttle_classes = [ScopedRateThrottle]
+	throttle_scope = "token_refresh"
+
+
+class ScopedTokenVerifyView(TokenVerifyView):
+	permission_classes = [AllowAny]
+	authentication_classes = []
+	throttle_classes = [ScopedRateThrottle]
+	throttle_scope = "token_verify"
